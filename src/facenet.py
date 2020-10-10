@@ -40,6 +40,9 @@ import re
 from tensorflow.python.platform import gfile
 import math
 from six import iteritems
+import imageio
+from PIL import Image
+
 
 def triplet_loss(anchor, positive, negative, alpha):
     """Calculate the triplet loss according to the FaceNet paper
@@ -244,7 +247,7 @@ def load_data(image_paths, do_random_crop, do_random_flip, image_size, do_prewhi
     nrof_samples = len(image_paths)
     images = np.zeros((nrof_samples, image_size, image_size, 3))
     for i in range(nrof_samples):
-        img = misc.imread(image_paths[i])
+        img = imageio.imread(image_paths[i])  # img = misc.imread(image_paths[i]) # scipy.misc.imread deprecated, use imageio.imread instead
         if img.ndim == 2:
             img = to_rgb(img)
         if do_prewhiten:
@@ -315,18 +318,31 @@ class ImageClass():
         return len(self.image_paths)
   
 def get_dataset(path, has_class_directories=True):
+    # <axg> Repurpose unused has_class_directories input arg.
+    # If True (default), the function expects a root folder where each class is its own subdirectory.
+    # If False, it expects the specified path to point directly to the only class.
+    # TO DO: add functionality to clean up image_paths to only known image types, e.g. png, jpg
     dataset = []
     path_exp = os.path.expanduser(path)
-    classes = [path for path in os.listdir(path_exp) \
-                    if os.path.isdir(os.path.join(path_exp, path))]
+    if has_class_directories:
+        classes = [
+            path
+            for path in os.listdir(path_exp)
+            if os.path.isdir(os.path.join(path_exp, path))
+        ]
+    else:
+        classes = [os.path.split(path_exp)[1]]
     classes.sort()
     nrof_classes = len(classes)
     for i in range(nrof_classes):
         class_name = classes[i]
-        facedir = os.path.join(path_exp, class_name)
+        if has_class_directories:
+            facedir = os.path.join(path_exp, class_name)
+        else:
+            facedir = path_exp
         image_paths = get_image_paths(facedir)
         dataset.append(ImageClass(class_name, image_paths))
-  
+
     return dataset
 
 def get_image_paths(facedir):
@@ -367,8 +383,8 @@ def load_model(model, input_map=None):
     model_exp = os.path.expanduser(model)
     if (os.path.isfile(model_exp)):
         print('Model filename: %s' % model_exp)
-        with gfile.FastGFile(model_exp,'rb') as f:
-            graph_def = tf.GraphDef()
+        with tf.compat.v1.gfile.GFile(model_exp, 'rb') as f:  # gfile.FastGFile(model_exp,'rb') as f:
+            graph_def = tf.compat.v1.GraphDef()
             graph_def.ParseFromString(f.read())
             tf.import_graph_def(graph_def, input_map=input_map, name='')
     else:

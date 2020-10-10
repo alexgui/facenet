@@ -31,28 +31,41 @@ import os
 import argparse
 import tensorflow as tf
 import numpy as np
-import facenet
-import align.detect_face
+from facenet_package.src import facenet
+from facenet_package.src.align import detect_face
 import random
 from time import sleep
+import imageio
+from PIL import Image
 
-def main(args):
+
+def align(args, single_class=False):
     sleep(random.random())
-    output_dir = os.path.expanduser(args.output_dir)
+    # output_dir = os.path.expanduser(args.output_dir)
+    if single_class:
+        output_dir = os.path.expanduser(os.path.split(args.output_dir)[0])
+    else:  # Default
+        output_dir = os.path.expanduser(args.output_dir)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     # Store some git revision info in a text file in the log directory
     src_path,_ = os.path.split(os.path.realpath(__file__))
     facenet.store_revision_info(src_path, output_dir, ' '.join(sys.argv))
-    dataset = facenet.get_dataset(args.input_dir)
-    
+    # dataset = facenet.get_dataset(args.input_dir)
+    # if not single_class:
+    #     dataset = facenet.get_dataset(args.input_dir)
+    # else:
+    #     dataset = facenet.get_dataset(args.input_dir, False)
+
+    dataset = facenet.get_dataset(args.input_dir, not single_class)
+
     print('Creating networks and loading parameters')
     
     with tf.Graph().as_default():
-        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_memory_fraction)
-        sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=False))
+        gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=args.gpu_memory_fraction)
+        sess = tf.compat.v1.Session(config=tf.compat.v1.ConfigProto(gpu_options=gpu_options, log_device_placement=False))
         with sess.as_default():
-            pnet, rnet, onet = align.detect_face.create_mtcnn(sess, None)
+            pnet, rnet, onet = detect_face.create_mtcnn(sess, None)
     
     minsize = 20 # minimum size of face
     threshold = [ 0.6, 0.7, 0.7 ]  # three steps's threshold
@@ -80,7 +93,7 @@ def main(args):
                 print(image_path)
                 if not os.path.exists(output_filename):
                     try:
-                        img = misc.imread(image_path)
+                        img = imageio.imread(image_path)  # misc.imread(image_path) # scipy.misc.imread deprecated, use imageio.imread instead
                     except (IOError, ValueError, IndexError) as e:
                         errorMessage = '{}: {}'.format(image_path, e)
                         print(errorMessage)
@@ -93,7 +106,7 @@ def main(args):
                             img = facenet.to_rgb(img)
                         img = img[:,:,0:3]
     
-                        bounding_boxes, _ = align.detect_face.detect_face(img, minsize, pnet, rnet, onet, threshold, factor)
+                        bounding_boxes, _ = detect_face.detect_face(img, minsize, pnet, rnet, onet, threshold, factor)
                         nrof_faces = bounding_boxes.shape[0]
                         if nrof_faces>0:
                             det = bounding_boxes[:,0:4]
@@ -121,14 +134,15 @@ def main(args):
                                 bb[2] = np.minimum(det[2]+args.margin/2, img_size[1])
                                 bb[3] = np.minimum(det[3]+args.margin/2, img_size[0])
                                 cropped = img[bb[1]:bb[3],bb[0]:bb[2],:]
-                                scaled = misc.imresize(cropped, (args.image_size, args.image_size), interp='bilinear')
+                                # scaled = misc.imresize(cropped, (args.image_size, args.image_size), interp='bilinear')
+                                scaled = np.array(Image.fromarray(cropped).resize((args.image_size, args.image_size), resample=Image.BILINEAR))  # scipy.misc.imresize deprecated, use PIL instead
                                 nrof_successfully_aligned += 1
                                 filename_base, file_extension = os.path.splitext(output_filename)
                                 if args.detect_multiple_faces:
                                     output_filename_n = "{}_{}{}".format(filename_base, i, file_extension)
                                 else:
                                     output_filename_n = "{}{}".format(filename_base, file_extension)
-                                misc.imsave(output_filename_n, scaled)
+                                imageio.imwrite(output_filename_n, scaled)  # misc.imsave(output_filename_n, scaled) # scipy.misc.imsave deprecated, use imageio.imwrite
                                 text_file.write('%s %d %d %d %d\n' % (output_filename_n, bb[0], bb[1], bb[2], bb[3]))
                         else:
                             print('Unable to align "%s"' % image_path)
@@ -154,6 +168,7 @@ def parse_arguments(argv):
     parser.add_argument('--detect_multiple_faces', type=bool,
                         help='Detect and align multiple faces per image.', default=False)
     return parser.parse_args(argv)
+
 
 if __name__ == '__main__':
     main(parse_arguments(sys.argv[1:]))
