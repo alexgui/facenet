@@ -61,12 +61,14 @@ def classifier(args, single_class=False):
 
             # Check that there are at least one training image per class
             for cls in dataset:
-                assert (
-                    len(cls.image_paths) > 0,
-                    "There must be at least one image for each class in the dataset",
-                )
+                assert len(cls.image_paths) > 0, "There must be at least one image for each class in the dataset"
 
             paths, labels = facenet.get_image_paths_and_labels(dataset)
+            # paths = [x for x in paths if "/.DS_Store" not in x]  # Remove any occurences of .DS_Store file (a problem for Macs)
+            for count, p in enumerate(paths):
+                if "/.DS_Store" in p:
+                    paths.pop(count)
+                    labels.pop(count)
 
             print("Number of classes: %d" % len(dataset))
             print("Number of images: %d" % len(paths))
@@ -144,25 +146,58 @@ def classifier(args, single_class=False):
                         )
                     )
 
-                avg_prob = np.mean(predictions, axis=0)
-                best_class = np.argmax(avg_prob)
-                if avg_prob[best_class] > 0.5:
-                    print(
-                        "The golfer is %s (average probability = %.3f)!"
-                        % (class_names[best_class], avg_prob[best_class])
-                    )
-                else:
-                    print(
-                        "The average probability for all golfers is < 0.5. I don"
-                        "t know who this is!"
-                    )
-                    print(
-                        "My best guess is that it"
-                        "s %s (average probability = %.3f)."
-                        % (class_names[best_class], avg_prob[best_class])
-                    )
+                # Determine weighted probabilities for each likely class
+                n_detections = len(best_class_probabilities)
+                detected_classes = []
+                detected_classes_probabilities = []
+                detected_classes_count = []
+                best_class_indices_unique = np.unique(best_class_indices)
+                for index in best_class_indices_unique:
+                    matching_best_class_indices = [i for i, x in enumerate(best_class_indices) if x == index]
+                    count = 0
+                    probability_sum = 0
+                    for index2 in matching_best_class_indices:
+                        count += 1
+                        probability_sum += best_class_probabilities[index2]
 
-                return class_names[best_class], avg_prob[best_class]
+                    this_class = class_names[index]
+                    average_for_class = probability_sum/count
+
+                    detected_classes.append(this_class)
+                    detected_classes_probabilities.append(average_for_class)
+                    detected_classes_count.append(count)
+
+                weighted_sum = np.sum(np.multiply(detected_classes_probabilities, detected_classes_count))
+                detected_classes_probabilities_weighted = \
+                    np.multiply(detected_classes_probabilities, detected_classes_count)/weighted_sum
+
+                # Determine the most likely class based on weighted probabilities
+                most_likely_index = np.argmax(detected_classes_probabilities_weighted)
+                most_likely_class = detected_classes[most_likely_index]
+                most_likely_probability = detected_classes_probabilities_weighted[most_likely_index]
+                most_likely_count = detected_classes_count[most_likely_index]
+                print(f'It is {most_likely_class} (probability = {most_likely_probability}, count = {most_likely_count}/{n_detections})')
+
+                # avg_prob = np.mean(predictions, axis=0)
+                # best_class = np.argmax(avg_prob)
+                # if avg_prob[best_class] > 0.5:
+                #     print(
+                #         "The golfer is %s (average probability = %.3f)!"
+                #         % (class_names[best_class], avg_prob[best_class])
+                #     )
+                # else:
+                #     print(
+                #         "The average probability for all golfers is < 0.5. I don"
+                #         "t know who this is!"
+                #     )
+                #     print(
+                #         "My best guess is that it"
+                #         "s %s (average probability = %.3f)."
+                #         % (class_names[best_class], avg_prob[best_class])
+                #     )
+
+                # return class_names[best_class], avg_prob[best_class]
+                return most_likely_class, most_likely_probability
 
                 # accuracy = np.mean(np.equal(best_class_indices, labels))
                 # print('Accuracy: %.3f' % accuracy)
